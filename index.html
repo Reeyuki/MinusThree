@@ -1,156 +1,92 @@
 <!DOCTYPE html>
 <html lang="en-us">
-  <head>
-    <meta charset="utf-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, viewport-fit=cover">
-    <title>MINUS THREE</title>
-    <style>
-      :root{color-scheme:dark}
-      html,body{height:100%;margin:0;background:#0b0f14;color:#e7edf5;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-      #app{height:100%;display:grid;place-items:center}
-      #unity-container{position:relative;width:100%;height:100%;display:grid;place-items:center}
-      #unity-canvas{width:100%;height:100%;background:#05070a;outline:none}
-      #hud{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
-      #panel{width:min(520px,92vw);padding:22px 22px 18px;border-radius:14px;background:rgba(17,22,29,.78);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08);box-shadow:0 18px 60px rgba(0,0,0,.55)}
-      #title{font-size:18px;font-weight:700;letter-spacing:.2px;margin:0 0 10px}
-      #meta{display:flex;justify-content:space-between;gap:14px;align-items:baseline;margin:0 0 10px;color:rgba(231,237,245,.82);font-size:13px}
-      #pct{font-variant-numeric:tabular-nums}
-      #bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
-      #fill{height:100%;width:0%;background:linear-gradient(90deg,#5aa9ff,#8b5cff);border-radius:999px;transition:width .12s ease}
-      #msg{margin:12px 0 0;font-size:12px;color:rgba(231,237,245,.72);line-height:1.35}
-      #fs{position:absolute;top:14px;right:14px;z-index:5;pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(17,22,29,.72);color:#e7edf5;font-weight:600;letter-spacing:.2px;cursor:pointer;user-select:none}
-      #fs:disabled{opacity:.5;cursor:default}
-      #fs:hover:not(:disabled){background:rgba(24,30,40,.85)}
-      #fs:active:not(:disabled){transform:translateY(1px)}
-    </style>
-  </head>
-  <body>
-    <div id="app">
-      <div id="unity-container">
-        <button id="fs" type="button" disabled>Fullscreen</button>
-        <canvas id="unity-canvas" tabindex="-1"></canvas>
-        <div id="hud">
-          <div id="panel" role="status" aria-live="polite">
-            <p id="title">Loading MINUS THREE</p>
-            <div id="meta">
-              <span id="state">Preparing files</span>
-              <span id="pct">0%</span>
-            </div>
-            <div id="bar"><div id="fill"></div></div>
-            <div id="msg"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <script>
-      const gameName = "MINUS THREE";
-      const baseUrl = "https://cdn.jsdelivr.net/gh/reeyuki/minusthree@main/";
-      const buildBase = baseUrl + "Build/";
-      const streamingAssetsUrl = baseUrl + "StreamingAssets";
-      const canvas = document.getElementById("unity-canvas");
-      const hud = document.getElementById("hud");
-      const stateEl = document.getElementById("state");
-      const pctEl = document.getElementById("pct");
-      const fillEl = document.getElementById("fill");
-      const msgEl = document.getElementById("msg");
-      const fsBtn = document.getElementById("fs");
-
-      document.title = gameName;
-
-      const pad2 = (n) => (n < 10 ? "0" + n : "" + n);
-      const setProgress = (p, label) => {
-        const clamped = Math.max(0, Math.min(1, p));
-        const pct = Math.round(clamped * 100);
-        fillEl.style.width = pct + "%";
-        pctEl.textContent = pct + "%";
-        if (label) stateEl.textContent = label;
-      };
-      const setMessage = (t) => { msgEl.textContent = t || ""; };
-      const fail = (t) => {
-        setProgress(1, "Failed");
-        setMessage(t);
-        throw new Error(t);
-      };
-
-      const assets = {
-        loader: "minusthree.loader.js",
-        data: { name: "minusthree.data.unityweb", chunks: 8, mime: "application/octet-stream" },
-        framework: { name: "minusthree.framework.js.unityweb", mime: "application/octet-stream" },
-        wasm: { name: "minusthree.wasm.unityweb", mime: "application/octet-stream" }
-      };
-
-      const fetchArrayBuffer = async (url) => {
-        const res = await fetch(url, { cache: "force-cache" });
-        if (!res.ok) fail("Fetch failed: " + res.status + " " + url);
-        return await res.arrayBuffer();
-      };
-
-      const concatArrayBuffers = (buffers) => {
-        let total = 0;
-        for (const b of buffers) total += b.byteLength;
-        const out = new Uint8Array(total);
-        let offset = 0;
-        for (const b of buffers) {
-          out.set(new Uint8Array(b), offset);
-          offset += b.byteLength;
-        }
-        return out.buffer;
-      };
-
-      const makeObjectUrl = (buf, mime) => URL.createObjectURL(new Blob([buf], { type: mime || "application/octet-stream" }));
-
-      const load = async () => {
-        setProgress(0, "Fetching files");
-        setMessage("");
-
-        const dataChunkUrls = Array.from({ length: assets.data.chunks }, (_, i) => buildBase + assets.data.name + pad2(i));
-        const dataPromise = Promise.all(dataChunkUrls.map(fetchArrayBuffer)).then((parts) => concatArrayBuffers(parts));
-        const fwPromise = fetchArrayBuffer(buildBase + assets.framework.name);
-        const wasmPromise = fetchArrayBuffer(buildBase + assets.wasm.name);
-
-        let dataBuf, fwBuf, wasmBuf;
-        try {
-          [dataBuf, fwBuf, wasmBuf] = await Promise.all([dataPromise, fwPromise, wasmPromise]);
-        } catch (e) {
-          fail((e && e.message) ? e.message : "Asset download failed");
-        }
-
-        setProgress(0.08, "Initializing");
-
-        const dataUrl = makeObjectUrl(dataBuf, assets.data.mime);
-        const frameworkUrl = makeObjectUrl(fwBuf, assets.framework.mime);
-        const codeUrl = makeObjectUrl(wasmBuf, assets.wasm.mime);
-
-        const loaderUrl = buildBase + assets.loader;
-        const script = document.createElement("script");
-        script.src = loaderUrl;
-        script.async = true;
-        script.onload = async () => {
-          const config = {
-            dataUrl,
-            frameworkUrl,
-            codeUrl,
-            streamingAssetsUrl,
-            companyName: "JosephPLover",
-            productName: gameName,
-            productVersion: "-3.6"
-          };
-          try {
-            const unityInstance = await createUnityInstance(canvas, config, (p) => setProgress(0.08 + p * 0.92, "Loading"));
-            hud.style.display = "none";
-            fsBtn.disabled = false;
-            fsBtn.onclick = () => unityInstance.SetFullscreen(1);
-          } catch (e) {
-            fail((e && e.message) ? e.message : "Unity initialization failed");
-          }
-        };
-        script.onerror = () => fail("Failed to load Unity loader: " + loaderUrl);
-        document.body.appendChild(script);
-      };
-
-      load();
-
-    </script>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>MINUS THREE</title>
+<style>
+body{margin:0;background:#0a0a0a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden}
+#unity-container{position:relative;width:100%;height:100%;display:flex;justify-content:center;align-items:center}
+canvas{width:100%;height:100%;background:#000;display:none;outline:none}
+#loading{text-align:center;z-index:10}
+#progress-text{font-size:18px;font-weight:300;margin-bottom:20px;letter-spacing:2px;text-transform:uppercase;color:#00ffa3;text-shadow:0 0 10px rgba(0,255,163,0.3)}
+#progress-bar{width:240px;height:2px;background:rgba(255,255,255,0.1);border-radius:1px;margin:0 auto;overflow:hidden}
+#progress-fill{width:0;height:100%;background:#00ffa3;box-shadow:0 0 15px #00ffa3;transition:width 0.3s ease-out}
+#fullscreen-btn{position:absolute;top:20px;right:20px;padding:10px 15px;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.1);color:#fff;cursor:pointer;border-radius:6px;display:none;z-index:100;font-size:12px;font-weight:600;letter-spacing:1px;backdrop-filter:blur(10px);transition:all 0.2s}
+#fullscreen-btn:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.3);transform:scale(1.05)}
+</style>
+</head>
+<body>
+<div id="unity-container">
+<canvas id="unity-canvas"></canvas>
+<div id="loading">
+<div id="progress-text">Initializing...</div>
+<div id="progress-bar"><div id="progress-fill"></div></div>
+</div>
+<button id="fullscreen-btn">FULLSCREEN</button>
+</div>
+<script>
+const ROOT = "https://cdn.jsdelivr.net/gh/Reeyuki/MinusThree@main/";
+const BUILD = ROOT + "Build/";
+const ASSETS = {
+loader: "minusthree.loader.js",
+framework: "minusthree.framework.js.unityweb",
+wasm: "minusthree.wasm.unityweb",
+dataName: "minusthree.data.unityweb",
+dataCount: 4
+};
+const canvas = document.querySelector("#unity-canvas");
+const loading = document.querySelector("#loading");
+const progressText = document.querySelector("#progress-text");
+const progressFill = document.querySelector("#progress-fill");
+const fsBtn = document.querySelector("#fullscreen-btn");
+async function start(){
+try{
+const paths = [BUILD+ASSETS.loader, BUILD+ASSETS.framework, BUILD+ASSETS.wasm];
+for(let i=0;i<ASSETS.dataCount;i++) paths.push(`${BUILD}${ASSETS.dataName}${String(i).padStart(2,'0')}`);
+let loaded = 0;
+const results = await Promise.all(paths.map(async p=>{
+const r = await fetch(p);
+if(!r.ok) throw new Error("Failed to load: " + p);
+const b = await r.arrayBuffer();
+loaded++;
+const pct = Math.round((loaded/paths.length)*100);
+progressText.innerText = `Loading Assets... ${pct}%`;
+progressFill.style.width = pct+"%";
+return b;
+}));
+const [lBuf, fBuf, wBuf, ...dChunks] = results;
+const dUrl = URL.createObjectURL(new Blob(dChunks));
+const fUrl = URL.createObjectURL(new Blob([fBuf]));
+const wUrl = URL.createObjectURL(new Blob([wBuf], {type:"application/wasm"}));
+const s = document.createElement("script");
+s.src = URL.createObjectURL(new Blob([lBuf]));
+s.onload = () => {
+createUnityInstance(canvas, {
+dataUrl: dUrl,
+frameworkUrl: fUrl,
+codeUrl: wUrl,
+streamingAssetsUrl: ROOT + "StreamingAssets",
+companyName: "JosephPLover",
+productName: "MINUS THREE",
+productVersion: "-3.6",
+}, (p) => {
+progressText.innerText = `Preparing... ${Math.round(p*100)}%`;
+progressFill.style.width = (p*100)+"%";
+}).then(i => {
+loading.style.display = "none";
+canvas.style.display = "block";
+fsBtn.style.display = "block";
+fsBtn.onclick = () => i.SetFullscreen(1);
+canvas.focus();
+});
+};
+document.body.appendChild(s);
+}catch(e){
+progressText.innerText = "LOAD FAILED";
+progressText.style.color = "#ff4444";
+}}
+start();
+</script>
+</body>
 </html>
